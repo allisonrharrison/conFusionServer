@@ -2,9 +2,9 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
 const authenticate = require("../authenticate");
-const Favorites = require("../models/favorites");
+const Favorites = require("../models/favorite");
 const cors = require("./cors");
-const User = require("..models/users");
+const User = require("..models/user");
 
 const favoriteRouter = express.Router();
 
@@ -34,33 +34,53 @@ favoriteRouter
       });
   })
   .post(cors.corsWithOptions, authenticate.verifyUser, (req, res, next) => {
-    User.findById(req.user._id, (err, user) => {
-      if (err) {
-        return done(err, false);
-      } else {
-        Favorites.findOne(
-          { user: mongoose.Types.ObjectId(user._id) },
-          (err, favorite) => {
-            if (err) {
-              return done(err, false);
-            } else {
-              Favorites.findOneAndUpdate(
-                { user: mongoose.Types.ObjectId(user._id) },
-                { $addToSet: { dishes: req.body._id } },
-                { upsert: true, returnNewDocument: true }
-              )
-                .then(
-                  user_favorite => {
+    Favorites.findOne({ user: req.user._id }, (err, favorite) => {
+      if (err) return next(err);
+
+      if (!favorite) {
+        Favorites.create({ user: req.user._id })
+          .then(favorite => {
+            for (i = 0; i < req.body.length; i++)
+              if (favorite.dishes.indexOf(req.body[i]._id) < 0)
+                favorite.dishes.push(req.body[i]);
+            favorite
+              .save()
+              .then(favorite => {
+                Favorites.findById(favorite._id)
+                  .populate("user")
+                  .populate("dishes")
+                  .then(favorite => {
                     res.statusCode = 200;
                     res.setHeader("Content-Type", "application/json");
-                    res.json(user_favorite);
-                  },
-                  err => next(err)
-                )
-                .catch(err => next(err));
-            }
-          }
-        );
+                    res.json(favorite);
+                  });
+              })
+              .catch(err => {
+                return next(err);
+              });
+          })
+          .catch(err => {
+            return next(err);
+          });
+      } else {
+        for (i = 0; i < req.body.length; i++)
+          if (favorite.dishes.indexOf(req.body[i]._id) < 0)
+            favorite.dishes.push(req.body[i]);
+        favorite
+          .save()
+          .then(favorite => {
+            Favorites.findById(favorite._id)
+              .populate("user")
+              .populate("dishes")
+              .then(favorite => {
+                res.statusCode = 200;
+                res.setHeader("Content-Type", "application/json");
+                res.json(favorite);
+              });
+          })
+          .catch(err => {
+            return next(err);
+          });
       }
     });
   })
@@ -85,51 +105,111 @@ favoriteRouter
 
 favoriteRouter
   .route("/:dishId")
-  .post(cors.corsWithOptions, authenticate.verifyUser, (req, res, next) => {
-    User.findById(req.user._id, (err, user) => {
-      if (err) {
-        return done(err, false);
-      } else {
-        Favorites.findOne(
-          { user: mongoose.Types.ObjectId(user._id) },
-          (err, favorite) => {
-            if (err) {
-              return done(err, false);
+  .options(cors.corsWithOptions, (req, res) => {
+    res.sendStatus(200);
+  })
+  .get(cors.cors, authenticate.verifyUser, (req, res, next) => {
+    Favorites.findOne({ user: req.user._id })
+      .then(
+        favorites => {
+          if (!favorites) {
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json");
+            return res.json({ exists: false, favorites: favorites });
+          } else {
+            if (favorites.dishes.indexOf(req.params.dishId) < 0) {
+              res.statusCode = 200;
+              res.setHeader("Content-Type", "application/json");
+              return res.json({ exists: false, favorites: favorites });
             } else {
-              Favorites.findOneAndUpdate(
-                { user: mongoose.Types.ObjectId(user._id) },
-                { $addToSet: { dishes: req.params.dishId } },
-                { upsert: true, returnNewDocument: true }
-              )
-                .then(
-                  user_favorite => {
-                    res.statusCode = 200;
-                    res.setHeader("Content-Type", "application/json");
-                    res.json(user_favorite);
-                  },
-                  err => next(err)
-                )
-                .catch(err => next(err));
+              res.statusCode = 200;
+              res.setHeader("Content-Type", "application/json");
+              return res.json({ exists: true, favorites: favorites });
             }
           }
-        );
-      }
-    });
-  })
-  .delete(cors.corsWithOptions, authenticate.verifyUser, (req, res, next) => {
-    Favorites.update(
-      { user: mongoose.Types.ObjectId(req.user._id) },
-      { $pull: { dishes: req.params.dishId } }
-    )
-      .then(
-        resp => {
-          res.statusCode = 200;
-          res.setHeader("Content-Type", "application/json");
-          res.json(resp);
         },
         err => next(err)
       )
       .catch(err => next(err));
+  })
+  .post(cors.corsWithOptions, authenticate.verifyUser, (req, res, next) => {
+    Favorites.findOne({ user: req.user._id }, (err, favorite) => {
+      if (err) return next(err);
+
+      if (!favorite) {
+        Favorites.create({ user: req.user._id })
+          .then(favorite => {
+            favorite.dishes.push({ _id: req.params.dishId });
+            favorite
+              .save()
+              .then(favorite => {
+                Favorites.findById(favorite._id)
+                  .populate("user")
+                  .populate("dishes")
+                  .then(favorite => {
+                    res.statusCode = 200;
+                    res.setHeader("Content-Type", "application/json");
+                    res.json(favorite);
+                  });
+              })
+              .catch(err => {
+                return next(err);
+              });
+          })
+          .catch(err => {
+            return next(err);
+          });
+      } else {
+        if (favorite.dishes.indexOf(req.params.dishId) < 0) {
+          favorite.dishes.push(req.body);
+          favorite
+            .save()
+            .then(favorite => {
+              Favorites.findById(favorite._id)
+                .populate("user")
+                .populate("dishes")
+                .then(favorite => {
+                  res.statusCode = 200;
+                  res.setHeader("Content-Type", "application/json");
+                  res.json(favorite);
+                });
+            })
+            .catch(err => {
+              return next(err);
+            });
+        }
+      }
+    });
+  })
+  .delete(cors.corsWithOptions, authenticate.verifyUser, (req, res, next) => {
+    Favorites.findOne({ user: req.user._id }, (err, favorite) => {
+      if (err) return next(err);
+
+      console.log(favorite);
+      var index = favorite.dishes.indexOf(req.params.dishId);
+      if (index >= 0) {
+        favorite.dishes.splice(index, 1);
+        favorite
+          .save()
+          .then(favorite => {
+            Favorites.findById(favorite._id)
+              .populate("user")
+              .populate("dishes")
+              .then(favorite => {
+                res.statusCode = 200;
+                res.setHeader("Content-Type", "application/json");
+                res.json(favorite);
+              });
+          })
+          .catch(err => {
+            return next(err);
+          });
+      } else {
+        res.statusCode = 404;
+        res.setHeader("Content-Type", "text/plain");
+        res.end("Dish " + req.params._id + " not in your favorites");
+      }
+    });
   });
 
 module.exports = favoriteRouter;
